@@ -1,0 +1,97 @@
+openapi: 3.0.3
+info:
+  title: Product Service API
+  description: RS School AWS Course - Module 3 (Serverless) - Product Service
+  version: 1.0.0
+servers:
+  - url: https://{apiId}.execute-api.{region}.amazonaws.com/dev
+    variables:
+      apiId:
+        default: replace-with-deployed-api-id
+      region:
+        default: eu-west-1
+paths:
+  /products:
+    get:
+      summary: Get all products
+      operationId: getProductsList
+      responses:
+        "200":
+          description: A list of available products
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/AvailableProduct"
+        "500":
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorMessage"
+  /products/{productId}:
+    get:
+      summary: Get a product by id
+      operationId: getProductsById
+      parameters:
+        - name: productId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Single product
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AvailableProduct"
+        "400":
+          description: Invalid product id
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorMessage"
+        "404":
+          description: Product not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorMessage"
+        "500":
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorMessage"
+components:
+  schemas:
+    Product:
+      type: object
+      required: [id, title, description, price]
+      properties:
+        id:
+          type: string
+          format: uuid
+        title:
+          type: string
+        description:
+          type: string
+        price:
+          type: number
+    AvailableProduct:
+      allOf:
+        - $ref: "#/components/schemas/Product"
+        - type: object
+          required: [count]
+          properties:
+            count:
+              type: integer
+              minimum: 0
+    ErrorMessage:
+      type: object
+      properties:
+        message:
+          type: string
