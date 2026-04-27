@@ -1,0 +1,7 @@
+{
+  "ProductServiceStack": {
+    "ProductsEndpoint": "https://49328e39sh.execute-api.us-east-1.amazonaws.com/dev/products",
+    "ApiUrl": "https://49328e39sh.execute-api.us-east-1.amazonaws.com/dev/",
+    "ProductServiceApiEndpointE57F6293": "https://49328e39sh.execute-api.us-east-1.amazonaws.com/dev/"
+  }
+}
