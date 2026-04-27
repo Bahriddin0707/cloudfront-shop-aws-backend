@@ -11,5 +11,5 @@ new ProductServiceStack(app, "ProductServiceStack", {
     region: process.env.CDK_DEFAULT_REGION ?? "eu-west-1",
   },
   description:
-    "RS School AWS Course - Module 3 (Serverless) - Product Service",
+    "RS School AWS Course - Modules 3 & 4 (Serverless + DynamoDB) - Product Service",
 });

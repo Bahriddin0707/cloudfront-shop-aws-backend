@@ -1,8 +1,8 @@
 openapi: 3.0.3
 info:
   title: Product Service API
-  description: RS School AWS Course - Module 3 (Serverless) - Product Service
-  version: 1.0.0
+  description: RS School AWS Course - Modules 3 & 4 - Product Service (DynamoDB)
+  version: 1.1.0
 servers:
   - url: https://{apiId}.execute-api.{region}.amazonaws.com/dev
     variables:
@@ -24,6 +24,34 @@ paths:
                 type: array
                 items:
                   $ref: "#/components/schemas/AvailableProduct"
+        "500":
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorMessage"
+    post:
+      summary: Create a new product (with stock count)
+      operationId: createProduct
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateProductInput"
+      responses:
+        "201":
+          description: Product created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AvailableProduct"
+        "400":
+          description: Invalid request body
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorMessage"
         "500":
           description: Internal server error
           content:
@@ -95,3 +123,18 @@ components:
       properties:
         message:
           type: string
+    CreateProductInput:
+      type: object
+      required: [title, price, count]
+      properties:
+        title:
+          type: string
+          minLength: 1
+        description:
+          type: string
+        price:
+          type: number
+          minimum: 0
+        count:
+          type: integer
+          minimum: 0
