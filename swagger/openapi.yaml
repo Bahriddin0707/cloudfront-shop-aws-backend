@@ -94,6 +94,41 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorMessage"
+  /import:
+    get:
+      summary: Get a presigned PUT URL to upload a CSV into the import bucket
+      description: |
+        Returns a short-lived (60s) S3 presigned PUT URL. The client should
+        PUT the raw CSV file body to that URL. The object will be created at
+        `uploaded/<name>` in the import bucket and trigger the parser Lambda.
+      operationId: importProductsFile
+      parameters:
+        - name: name
+          in: query
+          required: true
+          description: The CSV file name (must end with `.csv`)
+          schema:
+            type: string
+            pattern: "^[A-Za-z0-9._-]+\\.csv$"
+      responses:
+        "200":
+          description: A presigned PUT URL (string body)
+          content:
+            application/json:
+              schema:
+                type: string
+        "400":
+          description: Missing or invalid `name` parameter
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorMessage"
+        "500":
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorMessage"
 components:
   schemas:
     Product:
