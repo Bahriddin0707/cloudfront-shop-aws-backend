@@ -22,10 +22,35 @@ import {
   BillingMode,
   Table,
 } from "aws-cdk-lib/aws-dynamodb";
+import { Queue } from "aws-cdk-lib/aws-sqs";
+import { SqsEventSource } from "aws-cdk-lib/aws-lambda-event-sources";
+import { Topic, SubscriptionFilter } from "aws-cdk-lib/aws-sns";
+import {
+  Subscription as SnsSubscription,
+  SubscriptionProtocol,
+} from "aws-cdk-lib/aws-sns";
+
+export interface ProductServiceStackProps extends StackProps {
+  /** Email for the default (all-products) SNS subscription. */
+  readonly notificationEmail: string;
+  /** Optional second email that only receives "big" products via filter policy. */
+  readonly bigProductEmail?: string;
+  /** Threshold for the filter-policy subscription (price >= this value). */
+  readonly bigProductPriceThreshold?: number;
+}
 
 export class ProductServiceStack extends Stack {
-  constructor(scope: Construct, id: string, props?: StackProps) {
+  /** Exposed so other stacks (e.g. ImportServiceStack) can grant SendMessage. */
+  public readonly catalogItemsQueue: Queue;
+
+  constructor(scope: Construct, id: string, props: ProductServiceStackProps) {
     super(scope, id, props);
+
+    const {
+      notificationEmail,
+      bigProductEmail,
+      bigProductPriceThreshold = 100,
+    } = props;
 
     // ---- DynamoDB tables (Task 4) -----------------------------------------
     const productsTable = new Table(this, "ProductsTable", {
@@ -41,6 +66,41 @@ export class ProductServiceStack extends Stack {
       billingMode: BillingMode.PAY_PER_REQUEST,
       removalPolicy: RemovalPolicy.DESTROY,
     });
+
+    // ---- SQS queue (Task 6) ----------------------------------------------
+    const catalogItemsQueue = new Queue(this, "CatalogItemsQueue", {
+      queueName: "catalogItemsQueue",
+      visibilityTimeout: Duration.seconds(60),
+      retentionPeriod: Duration.days(4),
+    });
+    this.catalogItemsQueue = catalogItemsQueue;
+
+    // ---- SNS topic + subscriptions (Task 6) ------------------------------
+    const createProductTopic = new Topic(this, "CreateProductTopic", {
+      topicName: "createProductTopic",
+      displayName: "Product created notifications",
+    });
+
+    // Default subscription: receives ALL product-created events.
+    new SnsSubscription(this, "CreateProductTopicDefaultEmailSub", {
+      topic: createProductTopic,
+      protocol: SubscriptionProtocol.EMAIL,
+      endpoint: notificationEmail,
+    });
+
+    // Filter-policy subscription: only receives "expensive" products.
+    if (bigProductEmail) {
+      new SnsSubscription(this, "CreateProductTopicBigProductEmailSub", {
+        topic: createProductTopic,
+        protocol: SubscriptionProtocol.EMAIL,
+        endpoint: bigProductEmail,
+        filterPolicy: {
+          price: SubscriptionFilter.numericFilter({
+            greaterThanOrEqualTo: bigProductPriceThreshold,
+          }),
+        },
+      });
+    }
 
     // ---- Shared Lambda config ---------------------------------------------
     const sharedLambdaProps = {
@@ -88,6 +148,36 @@ export class ProductServiceStack extends Stack {
       description: "Creates product + stock atomically via TransactWrite",
     });
 
+    // catalogBatchProcess: SQS-triggered, creates products in batches and
+    // publishes an SNS notification per created product.
+    const catalogBatchProcessFn = new NodejsFunction(
+      this,
+      "CatalogBatchProcessFn",
+      {
+        ...sharedLambdaProps,
+        functionName: "catalogBatchProcess",
+        entry: path.join(
+          __dirname,
+          "../src/handlers/catalogBatchProcess.ts"
+        ),
+        handler: "handler",
+        timeout: Duration.seconds(30),
+        description:
+          "SQS-triggered (batch=5): creates products in DDB and publishes SNS event",
+        environment: {
+          ...sharedLambdaProps.environment,
+          CREATE_PRODUCT_TOPIC_ARN: createProductTopic.topicArn,
+        },
+      }
+    );
+
+    catalogBatchProcessFn.addEventSource(
+      new SqsEventSource(catalogItemsQueue, {
+        batchSize: 5,
+        reportBatchItemFailures: true,
+      })
+    );
+
     // ---- IAM --------------------------------------------------------------
     productsTable.grantReadData(getProductsListFn);
     stocksTable.grantReadData(getProductsListFn);
@@ -97,6 +187,12 @@ export class ProductServiceStack extends Stack {
 
     productsTable.grantWriteData(createProductFn);
     stocksTable.grantWriteData(createProductFn);
+
+    productsTable.grantWriteData(catalogBatchProcessFn);
+    stocksTable.grantWriteData(catalogBatchProcessFn);
+    createProductTopic.grantPublish(catalogBatchProcessFn);
+    // SqsEventSource auto-grants Receive/Delete; explicit for clarity:
+    catalogItemsQueue.grantConsumeMessages(catalogBatchProcessFn);
 
     // ---- API Gateway ------------------------------------------------------
     const api = new RestApi(this, "ProductServiceApi", {
@@ -149,6 +245,19 @@ export class ProductServiceStack extends Stack {
 
     new CfnOutput(this, "StocksTableName", {
       value: stocksTable.tableName,
+    });
+
+    new CfnOutput(this, "CatalogItemsQueueUrl", {
+      value: catalogItemsQueue.queueUrl,
+      description: "SQS queue consumed by catalogBatchProcess",
+    });
+
+    new CfnOutput(this, "CatalogItemsQueueArn", {
+      value: catalogItemsQueue.queueArn,
+    });
+
+    new CfnOutput(this, "CreateProductTopicArn", {
+      value: createProductTopic.topicArn,
     });
   }
 }

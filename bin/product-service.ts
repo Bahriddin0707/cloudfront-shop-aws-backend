@@ -11,14 +11,23 @@ const env = {
   region: process.env.CDK_DEFAULT_REGION ?? "eu-west-1",
 };
 
-new ProductServiceStack(app, "ProductServiceStack", {
+const NOTIFICATION_EMAIL =
+  process.env.SNS_NOTIFICATION_EMAIL ?? "omonovamohigul95@gmail.com";
+const BIG_PRODUCT_EMAIL =
+  process.env.SNS_BIG_PRODUCT_EMAIL ?? "omonovamohigul95@gmail.com";
+
+const productStack = new ProductServiceStack(app, "ProductServiceStack", {
   env,
   description:
-    "RS School AWS Course - Modules 3 & 4 (Serverless + DynamoDB) - Product Service",
+    "RS School AWS Course - Modules 3, 4 & 6 - Product Service (DDB + SQS + SNS)",
+  notificationEmail: NOTIFICATION_EMAIL,
+  bigProductEmail: BIG_PRODUCT_EMAIL,
+  bigProductPriceThreshold: 100,
 });
 
 new ImportServiceStack(app, "ImportServiceStack", {
   env,
   description:
-    "RS School AWS Course - Module 5 (S3 Integration) - Import Service",
+    "RS School AWS Course - Modules 5 & 6 - Import Service (S3 -> SQS)",
+  catalogItemsQueue: productStack.catalogItemsQueue,
 });

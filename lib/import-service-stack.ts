@@ -26,13 +26,21 @@ import {
 } from "aws-cdk-lib/aws-s3";
 import { LambdaDestination } from "aws-cdk-lib/aws-s3-notifications";
 import { BucketDeployment, Source } from "aws-cdk-lib/aws-s3-deployment";
+import { IQueue } from "aws-cdk-lib/aws-sqs";
 
 const UPLOAD_PREFIX = "uploaded/";
 const PARSED_PREFIX = "parsed/";
 
+export interface ImportServiceStackProps extends StackProps {
+  /** SQS queue created in ProductServiceStack; parser pushes CSV rows here. */
+  readonly catalogItemsQueue: IQueue;
+}
+
 export class ImportServiceStack extends Stack {
-  constructor(scope: Construct, id: string, props?: StackProps) {
+  constructor(scope: Construct, id: string, props: ImportServiceStackProps) {
     super(scope, id, props);
+
+    const { catalogItemsQueue } = props;
 
     // ---- S3 bucket --------------------------------------------------------
     const importBucket = new Bucket(this, "ImportBucket", {
@@ -86,6 +94,7 @@ export class ImportServiceStack extends Stack {
         UPLOAD_PREFIX,
         PARSED_PREFIX,
         SIGNED_URL_TTL: "60",
+        CATALOG_ITEMS_QUEUE_URL: catalogItemsQueue.queueUrl,
       },
     };
 
@@ -117,6 +126,9 @@ export class ImportServiceStack extends Stack {
     importBucket.grantRead(importFileParserFn);
     importBucket.grantPut(importFileParserFn);
     importBucket.grantDelete(importFileParserFn);
+
+    // Allow the parser to push CSV rows into the catalog SQS queue (Task 6).
+    catalogItemsQueue.grantSendMessages(importFileParserFn);
 
     // ---- S3 -> Lambda trigger on uploaded/ -------------------------------
     importBucket.addEventNotification(
