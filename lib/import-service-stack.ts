@@ -15,8 +15,14 @@ import {
   RestApi,
   EndpointType,
   MethodLoggingLevel,
+  TokenAuthorizer,
+  AuthorizationType,
+  IdentitySource,
+  ResponseType as ApiGwResponseType,
 } from "aws-cdk-lib/aws-apigateway";
 import { RetentionDays } from "aws-cdk-lib/aws-logs";
+import { Function as LambdaFunction } from "aws-cdk-lib/aws-lambda";
+import { CfnPermission } from "aws-cdk-lib/aws-lambda";
 import {
   Bucket,
   BucketEncryption,
@@ -34,13 +40,15 @@ const PARSED_PREFIX = "parsed/";
 export interface ImportServiceStackProps extends StackProps {
   /** SQS queue created in ProductServiceStack; parser pushes CSV rows here. */
   readonly catalogItemsQueue: IQueue;
+  /** ARN of the basicAuthorizer Lambda (created in AuthorizationServiceStack). */
+  readonly basicAuthorizerFnArn: string;
 }
 
 export class ImportServiceStack extends Stack {
   constructor(scope: Construct, id: string, props: ImportServiceStackProps) {
     super(scope, id, props);
 
-    const { catalogItemsQueue } = props;
+    const { catalogItemsQueue, basicAuthorizerFnArn } = props;
 
     // ---- S3 bucket --------------------------------------------------------
     const importBucket = new Bucket(this, "ImportBucket", {
@@ -155,10 +163,67 @@ export class ImportServiceStack extends Stack {
       },
     });
 
+    // ---- Lambda Authorizer (Task 7) --------------------------------------
+    // Import the authorizer Lambda by ARN to break cross-stack cycle.
+    const basicAuthorizerFn = LambdaFunction.fromFunctionAttributes(
+      this,
+      "ImportedBasicAuthorizerFn",
+      {
+        functionArn: basicAuthorizerFnArn,
+        sameEnvironment: false,
+      }
+    );
+
+    const basicAuthorizer = new TokenAuthorizer(this, "BasicAuthorizer", {
+      handler: basicAuthorizerFn,
+      identitySource: IdentitySource.header("Authorization"),
+      resultsCacheTtl: Duration.seconds(0),
+      authorizerName: "basicAuthorizer",
+    });
+
+    // Manually grant API Gateway permission to invoke the authorizer Lambda.
+    // (fromFunctionAttributes with sameEnvironment: false skips auto-grants
+    // so we add it explicitly here in the API's stack.)
+    new CfnPermission(this, "ApiGwInvokeBasicAuthorizer", {
+      action: "lambda:InvokeFunction",
+      principal: "apigateway.amazonaws.com",
+      functionName: basicAuthorizerFnArn,
+      sourceArn: Stack.of(this).formatArn({
+        service: "execute-api",
+        resource: api.restApiId,
+        resourceName: "authorizers/*",
+      }),
+    });
+
+    // ---- Gateway responses so 401/403 reach the browser with CORS --------
+    // Lambda Authorizer denials normally return 4xx without CORS headers,
+    // which the browser shows as a generic network error. These overrides
+    // attach CORS + status so the FE can read the status code.
+    api.addGatewayResponse("Unauthorized", {
+      type: ApiGwResponseType.UNAUTHORIZED,
+      statusCode: "401",
+      responseHeaders: {
+        "Access-Control-Allow-Origin": "'*'",
+        "Access-Control-Allow-Headers": "'*'",
+      },
+    });
+    api.addGatewayResponse("AccessDenied", {
+      type: ApiGwResponseType.ACCESS_DENIED,
+      statusCode: "403",
+      responseHeaders: {
+        "Access-Control-Allow-Origin": "'*'",
+        "Access-Control-Allow-Headers": "'*'",
+      },
+    });
+
     const importResource = api.root.addResource("import");
     importResource.addMethod(
       "GET",
-      new LambdaIntegration(importProductsFileFn, { proxy: true })
+      new LambdaIntegration(importProductsFileFn, { proxy: true }),
+      {
+        authorizationType: AuthorizationType.CUSTOM,
+        authorizer: basicAuthorizer,
+      }
     );
 
     // ---- Outputs ---------------------------------------------------------
